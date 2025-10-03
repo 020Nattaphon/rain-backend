@@ -35,7 +35,7 @@ const publicVapidKey = process.env.VAPID_PUBLIC_KEY;
 const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
 
 webpush.setVapidDetails(
-  "6640011020@psu.ac.th", 
+  "mailto:6640011020@psu.ac.th", 
   publicVapidKey,
   privateVapidKey
 );
