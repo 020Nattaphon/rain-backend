@@ -1,20 +1,19 @@
-// index.js
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const { Server } = require("socket.io");
-const QRCode = require("qrcode");
+const webpush = require("web-push");
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
-const MONGO_URI = process.env.MONGO_URI || "";
+const MONGO_URI = process.env.MONGO_URI;
 
-// ✅ Connect MongoDB
+// ✅ เชื่อม MongoDB
 mongoose
   .connect(MONGO_URI)
   .then(() => console.log("✅ MongoDB Connected"))
@@ -31,6 +30,49 @@ const rainSchema = new mongoose.Schema({
 });
 const Rain = mongoose.model("Rain", rainSchema);
 
+// ✅ Web Push Config
+const publicVapidKey = process.env.VAPID_PUBLIC_KEY;
+const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
+
+webpush.setVapidDetails(
+  "6640011020@psu.ac.th", 
+  publicVapidKey,
+  privateVapidKey
+);
+
+let subscriptions = [];
+
+// ✅ Endpoint สมัครรับ Notification
+app.post("/subscribe", (req, res) => {
+  const subscription = req.body;
+  subscriptions.push(subscription);
+  res.status(201).json({ message: "✅ Subscription added" });
+});
+
+// ❌ Endpoint ยกเลิก Notification
+app.post("/unsubscribe", (req, res) => {
+  const subscription = req.body;
+
+  // ลบออกจาก array subscriptions
+  subscriptions = subscriptions.filter(
+    (sub) => JSON.stringify(sub) !== JSON.stringify(subscription)
+  );
+
+  res.json({ message: "🚫 Unsubscribed successfully" });
+});
+
+// ✅ ส่งแจ้งเตือน
+function sendNotification(message) {
+  subscriptions.forEach((sub, i) => {
+    webpush
+      .sendNotification(sub, JSON.stringify({ title: "🌧 Rain Alert", body: message }))
+      .catch((err) => {
+        console.error("❌ Push error:", err);
+        subscriptions.splice(i, 1); // ลบถ้า token ใช้ไม่ได้แล้ว
+      });
+  });
+}
+
 // ✅ HTTP + Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -39,19 +81,17 @@ const io = new Server(server, {
 
 io.on("connection", (socket) => {
   console.log("📡 Client connected", socket.id);
-  socket.on("disconnect", () =>
-    console.log("📴 Client disconnected", socket.id)
-  );
+  socket.on("disconnect", () => console.log("📴 Client disconnected", socket.id));
 });
 
-// ✅ ฟังก์ชันวิเคราะห์ฝน
+// ✅ Rule ตรวจฝน
 function analyzeRain(temperature, humidity) {
   if (typeof temperature !== "number" || typeof humidity !== "number")
     return false;
   return humidity > 80 && temperature >= 24 && temperature <= 30;
 }
 
-// ✅ POST: รับข้อมูลจาก ESP
+// ✅ POST จาก ESP32
 app.post("/api/data", async (req, res) => {
   try {
     const { temperature, humidity, device_id } = req.body;
@@ -68,15 +108,10 @@ app.post("/api/data", async (req, res) => {
     await doc.save();
 
     if (rain_detected) {
-      const payload = {
-        id: doc._id,
-        timestamp: doc.timestamp,
-        temperature: doc.temperature,
-        humidity: doc.humidity,
-        device_id: doc.device_id,
-        message: `🌧️ Rain detected at ${doc.device_id}`,
-      };
-      io.emit("rain_alert", payload);
+      const msg = `💧 ความชื้น: ${humidity}% 🌡 Temp: ${temperature}°C (อาจมีฝนตก)`;
+      io.emit("rain_alert", { ...doc._doc, message: msg });
+      sendNotification(msg);
+
       doc.alert_sent = true;
       await doc.save();
     }
@@ -88,7 +123,7 @@ app.post("/api/data", async (req, res) => {
   }
 });
 
-// ✅ GET: ดึงข้อมูลทั้งหมด
+// ✅ GET Data
 app.get("/api/data", async (req, res) => {
   try {
     const data = await Rain.find().sort({ timestamp: -1 }).limit(1000);
@@ -98,40 +133,18 @@ app.get("/api/data", async (req, res) => {
   }
 });
 
-// ✅ GET: สถิติใน 1 เดือน
+// ✅ GET Stats
 app.get("/api/stats/month", async (req, res) => {
   try {
     const oneMonthAgo = new Date();
     oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-
     const rains = await Rain.find({
       rain_detected: true,
       timestamp: { $gte: oneMonthAgo },
     }).sort({ timestamp: -1 });
-
     res.json({ total_rain: rains.length, details: rains });
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// ✅ GET: แสดง QR Code ของ Frontend
-app.get("/qrcode", async (req, res) => {
-  try {
-    const frontendUrl = process.env.FRONTEND_URL || "https://rain-frontend.onrender.com";
-
-    const qr = await QRCode.toDataURL(frontendUrl);
-    res.send(`
-      <html>
-        <body style="text-align:center; font-family:Arial;">
-          <h2>📱 Scan QR Code เพื่อเปิด RainApp</h2>
-          <img src="${qr}" />
-          <p><a href="${frontendUrl}" target="_blank">${frontendUrl}</a></p>
-        </body>
-      </html>
-    `);
-  } catch (err) {
-    res.status(500).json({ error: "❌ ไม่สามารถสร้าง QR Code ได้" });
   }
 });
 
