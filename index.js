@@ -90,7 +90,7 @@ io.on("connection", (socket) => {
 function analyzeRain(temperature, humidity) {
   if (typeof temperature !== "number" || typeof humidity !== "number")
     return false;
-  return humidity > 80 && temperature >= 24 && temperature <= 30;
+  return humidity > 60 && temperature >= 24 && temperature <= 35;
 }
 
 // ✅ Endpoint: POST จาก ESP32
