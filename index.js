@@ -24,7 +24,7 @@ const rainSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
   temperature: Number,
   humidity: Number,
-  rain_detected: Boolean,
+  rain_detected: Boolean, // จะเป็น true เฉพาะเมื่อเริ่มฝนตกครั้งใหม่
   alert_sent: Boolean,
   device_id: String,
 });
@@ -46,7 +46,6 @@ let subscriptions = [];
 app.post("/subscribe", (req, res) => {
   const subscription = req.body;
   subscriptions.push(subscription);
-  console.log("📩 New subscription added:", subscription.endpoint);
   res.status(201).json({ message: "✅ Subscription added" });
 });
 
@@ -56,23 +55,12 @@ app.post("/unsubscribe", (req, res) => {
   subscriptions = subscriptions.filter(
     (sub) => JSON.stringify(sub) !== JSON.stringify(subscription)
   );
-  console.log("🚫 Unsubscribed:", subscription.endpoint);
   res.json({ message: "🚫 Unsubscribed successfully" });
-});
-
-// ✅ Check Subscription
-app.post("/check-subscription", (req, res) => {
-  const subscription = req.body;
-  const exists = subscriptions.some(
-    (sub) => JSON.stringify(sub) === JSON.stringify(subscription)
-  );
-  res.json({ exists });
 });
 
 // ✅ ส่ง Notification
 function sendNotification(message) {
   subscriptions.forEach((sub, i) => {
-    console.log("📢 Sending push to:", sub.endpoint, "Message:", message);
     webpush
       .sendNotification(
         sub,
@@ -98,23 +86,48 @@ io.on("connection", (socket) => {
   );
 });
 
-// ✅ Rule ตรวจฝน
+// ✅ Rule ตรวจฝน (กำหนดเกณฑ์)
 function analyzeRain(temperature, humidity) {
   if (typeof temperature !== "number" || typeof humidity !== "number")
     return false;
-  return humidity > 60 && temperature >= 24 && temperature <= 35;
+  return humidity > 80 && temperature >= 24 && temperature <= 30;
 }
+
+// -------------------- ฝนตกแบบ Session --------------------
+let isRaining = false;
+let lastRainEndTime = null;
+const COOLDOWN_MINUTES = 30; // ถ้าฝนตกใหม่ภายใน 30 นาทีหลังหยุด → นับรวมกับรอบเดิม
 
 // ✅ Endpoint: POST จาก ESP32
 app.post("/api/data", async (req, res) => {
   try {
     const { temperature, humidity, device_id } = req.body;
-    const rain_detected = analyzeRain(temperature, humidity);
+    const detected = analyzeRain(temperature, humidity);
+
+    let countAsNewRain = false;
+
+    if (detected && !isRaining) {
+      // เริ่มฝนใหม่
+      const now = new Date();
+      if (
+        !lastRainEndTime ||
+        (now - lastRainEndTime) / 60000 > COOLDOWN_MINUTES
+      ) {
+        countAsNewRain = true; // ✅ นับเป็นฝนตกครั้งใหม่
+      }
+      isRaining = true;
+    }
+
+    if (!detected && isRaining) {
+      // ฝนหยุด
+      lastRainEndTime = new Date();
+      isRaining = false;
+    }
 
     const doc = new Rain({
       temperature,
       humidity,
-      rain_detected,
+      rain_detected: countAsNewRain,
       alert_sent: false,
       device_id: device_id || "ESP-32",
     });
@@ -130,16 +143,16 @@ app.post("/api/data", async (req, res) => {
       device_id: doc.device_id,
     });
 
-    // ✅ ถ้ามีฝน → แจ้งเตือน
-    if (rain_detected) {
-      const msg = `💧 ความชื้น: ${humidity}% 🌡 Temp: ${temperature}°C (อาจมีฝนตก)`;
+    // ✅ แจ้งเตือนเมื่อฝนตกใหม่
+    if (countAsNewRain) {
+      const msg = `🌧 ฝนตกใหม่ ความชื้น: ${humidity}% Temp: ${temperature}°C`;
       sendNotification(msg);
 
       doc.alert_sent = true;
       await doc.save();
     }
 
-    res.status(201).json({ message: "✅ Data saved", rain_detected });
+    res.status(201).json({ message: "✅ Data saved", rain_detected: countAsNewRain });
   } catch (err) {
     console.error("POST /api/data error:", err);
     res.status(500).json({ error: err.message });
