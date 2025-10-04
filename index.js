@@ -46,6 +46,7 @@ let subscriptions = [];
 app.post("/subscribe", (req, res) => {
   const subscription = req.body;
   subscriptions.push(subscription);
+  console.log("📩 New subscription added:", subscription.endpoint);
   res.status(201).json({ message: "✅ Subscription added" });
 });
 
@@ -55,12 +56,23 @@ app.post("/unsubscribe", (req, res) => {
   subscriptions = subscriptions.filter(
     (sub) => JSON.stringify(sub) !== JSON.stringify(subscription)
   );
+  console.log("🚫 Unsubscribed:", subscription.endpoint);
   res.json({ message: "🚫 Unsubscribed successfully" });
+});
+
+// ✅ Check Subscription
+app.post("/check-subscription", (req, res) => {
+  const subscription = req.body;
+  const exists = subscriptions.some(
+    (sub) => JSON.stringify(sub) === JSON.stringify(subscription)
+  );
+  res.json({ exists });
 });
 
 // ✅ ส่ง Notification
 function sendNotification(message) {
   subscriptions.forEach((sub, i) => {
+    console.log("📢 Sending push to:", sub.endpoint, "Message:", message);
     webpush
       .sendNotification(
         sub,
@@ -109,7 +121,7 @@ app.post("/api/data", async (req, res) => {
 
     await doc.save();
 
-    // ✅ Broadcast Realtime (clean object)
+    // ✅ Broadcast Realtime
     io.emit("rain_alert", {
       timestamp: doc.timestamp,
       temperature: doc.temperature,
