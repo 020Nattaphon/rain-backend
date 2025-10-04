@@ -7,7 +7,7 @@ const { Server } = require("socket.io");
 const webpush = require("web-push");
 
 const app = express();
-app.use(cors({ origin: process.env.CORS_ORIGIN || "*" }));
+app.use(cors({ origin: process.env.FRONTEND_URL || "*" }));
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
@@ -62,7 +62,10 @@ app.post("/unsubscribe", (req, res) => {
 function sendNotification(message) {
   subscriptions.forEach((sub, i) => {
     webpush
-      .sendNotification(sub, JSON.stringify({ title: "🌧 Rain Alert", body: message }))
+      .sendNotification(
+        sub,
+        JSON.stringify({ title: "🌧 Rain Alert", body: message })
+      )
       .catch((err) => {
         console.error("❌ Push error:", err);
         subscriptions.splice(i, 1);
@@ -73,17 +76,20 @@ function sendNotification(message) {
 // ✅ HTTP + Socket.IO
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: process.env.CORS_ORIGIN || "*" },
+  cors: { origin: process.env.FRONTEND_URL || "*" },
 });
 
 io.on("connection", (socket) => {
   console.log("📡 Client connected:", socket.id);
-  socket.on("disconnect", () => console.log("📴 Client disconnected:", socket.id));
+  socket.on("disconnect", () =>
+    console.log("📴 Client disconnected:", socket.id)
+  );
 });
 
 // ✅ Rule ตรวจฝน
 function analyzeRain(temperature, humidity) {
-  if (typeof temperature !== "number" || typeof humidity !== "number") return false;
+  if (typeof temperature !== "number" || typeof humidity !== "number")
+    return false;
   return humidity > 80 && temperature >= 24 && temperature <= 30;
 }
 
@@ -103,8 +109,14 @@ app.post("/api/data", async (req, res) => {
 
     await doc.save();
 
-    // ✅ Broadcast Realtime
-    io.emit("rain_alert", doc);
+    // ✅ Broadcast Realtime (clean object)
+    io.emit("rain_alert", {
+      timestamp: doc.timestamp,
+      temperature: doc.temperature,
+      humidity: doc.humidity,
+      rain_detected: doc.rain_detected,
+      device_id: doc.device_id,
+    });
 
     // ✅ ถ้ามีฝน → แจ้งเตือน
     if (rain_detected) {
