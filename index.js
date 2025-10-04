@@ -35,40 +35,37 @@ const publicVapidKey = process.env.VAPID_PUBLIC_KEY;
 const privateVapidKey = process.env.VAPID_PRIVATE_KEY;
 
 webpush.setVapidDetails(
-  "mailto:6640011020@psu.ac.th", 
+  "mailto:admin@example.com",
   publicVapidKey,
   privateVapidKey
 );
 
 let subscriptions = [];
 
-// ✅ Endpoint สมัครรับ Notification
+// ✅ Subscribe Notification
 app.post("/subscribe", (req, res) => {
   const subscription = req.body;
   subscriptions.push(subscription);
   res.status(201).json({ message: "✅ Subscription added" });
 });
 
-// ❌ Endpoint ยกเลิก Notification
+// ✅ Unsubscribe Notification
 app.post("/unsubscribe", (req, res) => {
   const subscription = req.body;
-
-  // ลบออกจาก array subscriptions
   subscriptions = subscriptions.filter(
     (sub) => JSON.stringify(sub) !== JSON.stringify(subscription)
   );
-
   res.json({ message: "🚫 Unsubscribed successfully" });
 });
 
-// ✅ ส่งแจ้งเตือน
+// ✅ ส่ง Notification
 function sendNotification(message) {
   subscriptions.forEach((sub, i) => {
     webpush
       .sendNotification(sub, JSON.stringify({ title: "🌧 Rain Alert", body: message }))
       .catch((err) => {
         console.error("❌ Push error:", err);
-        subscriptions.splice(i, 1); // ลบถ้า token ใช้ไม่ได้แล้ว
+        subscriptions.splice(i, 1);
       });
   });
 }
@@ -80,18 +77,17 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-  console.log("📡 Client connected", socket.id);
-  socket.on("disconnect", () => console.log("📴 Client disconnected", socket.id));
+  console.log("📡 Client connected:", socket.id);
+  socket.on("disconnect", () => console.log("📴 Client disconnected:", socket.id));
 });
 
 // ✅ Rule ตรวจฝน
 function analyzeRain(temperature, humidity) {
-  if (typeof temperature !== "number" || typeof humidity !== "number")
-    return false;
+  if (typeof temperature !== "number" || typeof humidity !== "number") return false;
   return humidity > 80 && temperature >= 24 && temperature <= 30;
 }
 
-// ✅ POST จาก ESP32
+// ✅ Endpoint: POST จาก ESP32
 app.post("/api/data", async (req, res) => {
   try {
     const { temperature, humidity, device_id } = req.body;
@@ -102,14 +98,17 @@ app.post("/api/data", async (req, res) => {
       humidity,
       rain_detected,
       alert_sent: false,
-      device_id: device_id || "ESP-01",
+      device_id: device_id || "ESP-32",
     });
 
     await doc.save();
 
+    // ✅ Broadcast Realtime
+    io.emit("rain_alert", doc);
+
+    // ✅ ถ้ามีฝน → แจ้งเตือน
     if (rain_detected) {
       const msg = `💧 ความชื้น: ${humidity}% 🌡 Temp: ${temperature}°C (อาจมีฝนตก)`;
-      io.emit("rain_alert", { ...doc._doc, message: msg });
       sendNotification(msg);
 
       doc.alert_sent = true;
@@ -123,7 +122,7 @@ app.post("/api/data", async (req, res) => {
   }
 });
 
-// ✅ GET Data
+// ✅ Endpoint: GET ข้อมูลย้อนหลัง
 app.get("/api/data", async (req, res) => {
   try {
     const data = await Rain.find().sort({ timestamp: -1 }).limit(1000);
@@ -133,7 +132,7 @@ app.get("/api/data", async (req, res) => {
   }
 });
 
-// ✅ GET Stats
+// ✅ Endpoint: GET Stats รายเดือน
 app.get("/api/stats/month", async (req, res) => {
   try {
     const oneMonthAgo = new Date();
@@ -148,7 +147,7 @@ app.get("/api/stats/month", async (req, res) => {
   }
 });
 
-// ✅ Start server
+// ✅ Start Server
 server.listen(PORT, () =>
   console.log(`🚀 Backend running on http://localhost:${PORT}`)
 );

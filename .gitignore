@@ -1,7 +1,7 @@
 # Node modules
 node_modules/
 
-# Environment files
+# Env files
 .env
 
 # Logs
@@ -9,11 +9,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Build outputs
-dist/
-build/
-
-# System files
+# OS files
 .DS_Store
+Thumbs.db
 
-
+# Build
+dist/
