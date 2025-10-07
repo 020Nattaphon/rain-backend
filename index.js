@@ -90,7 +90,7 @@ io.on("connection", (socket) => {
 function analyzeRain(temperature, humidity) {
   if (typeof temperature !== "number" || typeof humidity !== "number")
     return false;
-  return humidity > 30 && temperature >= 18 && temperature <= 30;
+  return humidity > 50 && temperature >= 18 && temperature <= 35;
 }
 
 // -------------------- ฝนตกแบบ Session --------------------
